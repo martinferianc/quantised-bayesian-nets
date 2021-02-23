@@ -2,7 +2,7 @@
 
 by Martin Ferianc (martin.ferianc.19@ucl.ac.uk), Partha Maji, Matthew Mattina and Miguel Rodrigues
 
-The paper can be found at: <LINK>
+The paper can be found at: https://arxiv.org/abs/2102.11062
 
 - [Evaluating quantised Bayesian neural networks](#evaluating-quantised-bayesian-neural-networks)
   - [Description](#description)
@@ -127,8 +127,14 @@ All source code is made available under a BSD 3-clause license. You can freely u
 The manuscript text is not open source. The authors reserve the rights to the article content. If you use ideas presented in this work please cite our work: 
 
 ```bibtex
-<CITATION>
-
+@misc{ferianc2021effects,
+      title={On the Effects of Quantisation on Model Uncertainty in Bayesian Neural Networks}, 
+      author={Martin Ferianc and Partha Maji and Matthew Mattina and Miguel Rodrigues},
+      year={2021},
+      eprint={2102.11062},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG}
+}
 ```
 
 
