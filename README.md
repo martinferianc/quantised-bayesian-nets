@@ -93,9 +93,16 @@ source /path/to/new/virtual/environment/bin/activate
 pip3 install -r requirements.txt
 ```
 
-The main requirement is PyTorch==1.7.0, because it supports custom quantisation modules, which need to be implemented for each Bayesian method.
+The main requirement is PyTorch==1.7.0, because it supports custom quantisation modules, which need to be implemented for each Bayesian method. You will also need python==3.6 for the installation using `requirements.txt` to be successful.
 
-Additionally, there is an existing bug in PyTorch where the quantisation bounds are not passed to the siumlated quantisation module and it is necessary to modify its constructor such that: 
+If you use Anaconda/Miniconda, you can run the following commands:
+```
+conda create --name environment python=3.6
+conda activate environment
+pip install -r requirements.txt
+```
+
+Additionally, there is an existing bug in PyTorch where the quantisation bounds are not passed to the simulated quantisation module and it is necessary to modify its constructor such that: 
 
 ```python
 # In torch/quantization/fake_quantize.py
@@ -116,7 +123,7 @@ Without this it is not possible to simulate below 8-bit quantisation for weights
 
 ### Metrics
 
-We used a combined set of metrics to measure both the accuracy and the quality of uncertainty estimation under quantsation. For *regression*, we focused on the root-mean-squared-error (RMSE) and average negative-log-likelihood (NLL). For both *MNIST* and *CIFAR-10*, we looked at the classification error, average negative-log-likelihood (NLL), average predictive entropy (aPE) and expected calibration error (ECE). 
+We used a combined set of metrics to measure both the accuracy and the quality of uncertainty estimation under quantisation. For *regression*, we focused on the root-mean-squared-error (RMSE) and average negative-log-likelihood (NLL). For both *MNIST* and *CIFAR-10*, we looked at the classification error, average negative-log-likelihood (NLL), average predictive entropy (aPE) and expected calibration error (ECE). 
 
 ## Authors
 
