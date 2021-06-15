@@ -31,7 +31,6 @@ parso==0.7.1
 pexpect==4.8.0
 pickleshare==0.7.5
 Pillow==8.0.1
-pkg-resources==0.0.0
 prompt-toolkit==3.0.8
 protobuf==3.14.0
 ptyprocess==0.6.0
@@ -49,7 +48,6 @@ rsa==4.6
 scikit-learn==0.23.2
 scipy==1.5.4
 six==1.15.0
-sklearn==0.0
 tensorboard==2.4.0
 tensorboard-plugin-wit==1.7.0
 threadpoolctl==2.1.0
