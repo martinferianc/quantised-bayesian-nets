@@ -13,7 +13,6 @@ from torch.utils.tensorboard import SummaryWriter
 import torch.backends.cudnn as cudnn
 import re
 import shutil
-import uncertainty_metrics.numpy as um
 import copy 
 
 UINT_BOUNDS = {8: [0, 255], 7: [0, 127], 6: [0, 63], 5: [0, 31], 4: [0, 15], 3: [0, 7], 2: [0, 3]}
@@ -92,54 +91,6 @@ def save_model(model, args, special_info=""):
 
   with open(os.path.join(args.save, 'args.pt'), 'wb') as handle:
     pickle.dump(args, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
-
-def entropy(output):
-  batch_size = output.shape[0]
-  entropy = -torch.sum(torch.log(output+1e-8)*output)/batch_size
-  return entropy.item()
-
-
-def evaluate(output, input, target, model, args):
-  with torch.no_grad():
-    if args.samples>1 and model is not None and model.training is False:
-      y = [output]
-      for _ in range(1, args.samples):
-        y.append(model(input))
-      if "regression" in args.task:
-        mu = [_y[0] for _y in y]
-        var = [_y[1] for _y in y]
-        mean = torch.stack(mu, dim=1).mean(dim=1)
-        var = torch.stack(mu, dim=1).var(dim=1) + torch.stack(var, dim=1).mean(dim=1)
-        output = (mean, var)
-      else:
-        output = torch.stack(y, dim=1).mean(dim=1)
-
-    if "classification" in args.task:
-        _loss = F.nll_loss(torch.log(output+1e-8), target).item()
-        _, pred = output.topk(1, 1, True, True)
-        pred = pred.t()
-        _ece = um.ece(target.cpu().numpy(), output.cpu().numpy(), num_bins=10)*100
-        _entropy = entropy(output)
-        _error = error(pred, target, args)
-        return _error, _ece, _entropy, _loss, output
-    elif "regression" in args.task:
-        mu, var = output
-        sigma = torch.sqrt(var)+1e-8
-        exponent = -0.5*(target - mu)**2/sigma**2
-        log_coeff = -torch.log(sigma+1e-8) - 0.5*np.log(2*np.pi)
-        _loss = (log_coeff + exponent).mean()
-        return error(output, target, args), 0, 0,  _loss.item(), output
-
-def error(output, target, args):
-  if "classification" in args.task:
-      batch_size = output.shape[1]
-      correct = output.eq(target.view(1, -1).expand_as(output))
-      correct_k = correct[:1].view(-1).float().sum(0)
-      res = 100-correct_k.mul_(100.0/batch_size)
-      return res.float().item()
-  elif "regression" in args.task:
-      return torch.sqrt(((output[0]-target)**2).mean()).float().item()
 
 def save_pickle(data, path, overwrite=False):
   path = check_path(path) if not overwrite else path

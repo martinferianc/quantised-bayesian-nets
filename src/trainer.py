@@ -5,9 +5,10 @@ import time
 import logging 
 from src.models.stochastic.sgld.utils_sgld import SGLD
 import numpy as np
+from src.metrics import ClassificationMetric, RegressionMetric
 
 class Trainer():
-  def __init__(self, model, criterion, optimizer, scheduler, args):
+  def __init__(self, model, criterion, optimizer, scheduler, args, writer=None):
     super().__init__()
     self.model = model
     self.criterion = criterion
@@ -26,36 +27,13 @@ class Trainer():
 
     self.epoch = 0
     self.iteration = 0
-
-  def _scalar_logging(self, obj, main_obj, nll, kl, error_metric, ece, entropy, info, iteration, writer):
-    _error_metric, _main_obj = None, None
-    if "classification" in self.args.task:
-        _error_metric, _main_obj  = 'error', 'ce'
-    elif self.args.task == "regression":
-        _error_metric, _main_obj = 'rmse', 'mse'
-    writer.add_scalar(info+_error_metric, error_metric, iteration)
-    writer.add_scalar(info+'loss', obj, iteration)
-    writer.add_scalar(info+_main_obj, main_obj, iteration)
-    writer.add_scalar(info+'kl', kl, iteration)
-    writer.add_scalar(info+'ece', ece, iteration)
-    writer.add_scalar(info+'entropy', entropy, iteration)
-    writer.add_scalar(info+'nll', nll, iteration)
-
     
-  def _get_average_meters(self):
-    error_metric = utils.AverageMeter()
-    obj = utils.AverageMeter()
-    main_obj = utils.AverageMeter()
-    nll = utils.AverageMeter()
-    kl = utils.AverageMeter()
-    ece = utils.AverageMeter()
-    entropy = utils.AverageMeter()
-    return error_metric, obj, main_obj, nll, kl, ece, entropy
-    
-  def train_loop(self, train_loader, valid_loader, writer=None, special_info=""):
+    self.train_metrics = ClassificationMetric(output_size=self.args.output_size, writer=writer) if "classification" in self.args.task else RegressionMetric(output_size=self.args.output_size, writer=writer)
+    self.valid_metrics = ClassificationMetric(output_size=self.args.output_size, writer=writer) if "classification" in self.args.task else RegressionMetric(output_size=self.args.output_size, writer=writer)
+    self.writer = writer
+
+  def train_loop(self, train_loader, valid_loader, special_info=""):
     best_error = float('inf')
-    train_error_metric = train_obj = train_main_obj = train_nll = train_ece = train_kl =  train_entropy = None
-    val_error_metric = val_obj = val_main_obj = val_nll = val_ece = val_kl =  val_entropy = None
 
     for epoch in range(self.args.epochs):
       if epoch >= 1 and self.scheduler is not None:
@@ -66,8 +44,8 @@ class Trainer():
       else:
         lr = self.args.learning_rate
 
-      if writer is not None:
-        writer.add_scalar('Train/learning_rate', lr, epoch)
+      if self.writer is not None:
+        self.writer.add_scalar('Train/learning_rate', lr, epoch)
 
       logging.info(
           '### Epoch: [%d/%d], Learning rate: %e ###', self.args.epochs,
@@ -77,25 +55,19 @@ class Trainer():
             '### Epoch: [%d/%d], Gamma: %e ###', self.args.epochs,
             epoch, self.args.gamma)
             
-   
-      train_obj, train_main_obj, train_nll, train_kl, train_error_metric, train_ece, train_entropy = self.train(train_loader, self.optimizer, writer)
+      self.train_metrics.reset()  
+      self.train(train_loader, self.optimizer)
       
-      logging.info('#### Train | Error: %f, Train loss: %f, Train main objective: %f, Train NLL: %f, Train KL: %f, Train ECE %f, Train entropy %f ####',
-                     train_error_metric, train_obj, train_main_obj, train_nll, train_kl, train_ece, train_entropy)
-
-      
-      if writer is not None:
-        self._scalar_logging(train_obj, train_main_obj, train_nll, train_kl, train_error_metric, train_ece, train_entropy, "Train/", epoch, writer)
+      logging.info("#### Train | %s ####", self.train_metrics.get_str())
+            
+      self.train_metrics.scalar_logging("train", epoch)
     
       # validation
       if valid_loader is not None:
-        val_obj, val_main_obj, val_nll, val_kl, val_error_metric, val_ece, val_entropy = self.infer(
-                                                          valid_loader, writer, "Valid")
-        logging.info('#### Valid | Error: %f, Valid loss: %f, Valid main objective: %f, Valid NLL: %f, Valid KL: %f, Valid ECE %f, Valid entropy %f ####',
-                      val_error_metric, val_obj, val_main_obj, val_nll, val_kl, val_ece, val_entropy)
-        
-        if writer is not None:
-          self._scalar_logging(val_obj, val_main_obj, val_nll, val_kl, val_error_metric, val_ece, val_entropy, "Valid/", epoch, writer)
+        self.valid_metrics.reset()
+        self.infer(valid_loader, "Valid")
+        logging.info("#### Valid | %s ####", self.valid_metrics.get_str())
+        val_error_metric = self.valid_metrics.get_key_metric()
       
       if self.args.save_last or val_error_metric <= best_error:
         # Avoid correlation between the samples
@@ -151,68 +123,52 @@ class Trainer():
         optimizer.step()
       self.iteration+=1
       
-    error_metric, ece, entropy, nll, _ = utils.evaluate(output, input, target, self.model, self.args)
 
     if train_timer:
+      self.train_metrics.update(output=output, target=target, obj=obj, kl=kl, main_obj=main_obj)
       self.train_time += time.time() - start
     else:
+      self.valid_metrics.update(output=output, target=target, obj=obj, kl=kl, main_obj=main_obj)
       self.val_time += time.time() - start
       
-    return error_metric, obj.item(), main_obj.item(), nll, kl.item(), ece, entropy
 
 
-  def train(self, loader, optimizer, writer):
-    error_metric, obj, main_obj, nll, kl, ece, entropy = self._get_average_meters()
+  def train(self, loader, optimizer):
     self.model.train()
 
     for step, (input, target) in enumerate(loader):
-      n = input.shape[0]
-      _error_metric, _obj, _main_obj, _nll, _kl, _ece, _entropy= self._step(input, target, optimizer, len(loader), len(loader.dataset), True)
-      
-      obj.update(_obj, n)
-      main_obj.update(_main_obj, n)
-      nll.update(_nll, n)
-      kl.update(_kl, n)
-      error_metric.update(_error_metric, n)
-      ece.update(_ece, n)
-      entropy.update(_entropy, n)
+      self._step(input, target, optimizer, len(loader), len(loader.dataset), True)
+
 
       if step % self.args.report_freq == 0:
-        logging.info('##### Train step: [%03d/%03d] | Error: %f, Loss: %f, Main objective: %f, NLL: %f, KL: %f, ECE: %f, Entropy: %f #####',
-                       len(loader),  step, error_metric.avg, obj.avg, main_obj.avg, nll.avg, kl.avg, ece.avg, entropy.avg)
-        self._scalar_logging(obj.avg, main_obj.avg, nll.avg, kl.avg, error_metric.avg, ece.avg, entropy.avg, 'Train/Iteration/', self.train_step, writer)
+        logging.info(
+                    "##### Train step: [%03d/%03d] | %s #####",
+                    len(loader),
+                    step,
+                    self.train_metrics.get_str(),
+                )
         self.train_step += 1
       if self.args.debug:
         break
 
-    return obj.avg, main_obj.avg, nll.avg, kl.avg, error_metric.avg, ece.avg, entropy.avg
-
-  def infer(self, loader, writer, dataset="Valid"):
+  def infer(self, loader, dataset="Valid"):
     with torch.no_grad():
-      error_metric, obj, main_obj, nll, kl, ece, entropy = self._get_average_meters()
       self.model.eval()
 
       for step, (input, target) in enumerate(loader):
         n = input.shape[0]
-        _error_metric, _obj, _main_obj, _nll, _kl, _ece, _entropy = self._step(
+        self._step(
              input, target, None, len(loader), n * len(loader), False)
 
-        obj.update(_obj, n)
-        main_obj.update(_main_obj, n)
-        nll.update(_nll, n)
-        kl.update(_kl, n)
-        error_metric.update(_error_metric, n)
-        ece.update(_ece, n)
-        entropy.update(_entropy, n)
-        
         if step % self.args.report_freq == 0:
-          logging.info('##### {} step: [{}/{}] | Error: {}, Loss: {}, Main objective: {}, NLL: {}, KL: {}, ECE: {}, Entropy: {} #####'.format(
-                       dataset, len(loader), step, error_metric.avg, obj.avg, main_obj.avg, nll.avg, kl.avg, ece.avg, entropy.avg))
-          self._scalar_logging(obj.avg, main_obj.avg, nll.avg, kl.avg, error_metric.avg, ece.avg, entropy.avg, '{}/Iteration/'.format(dataset), self.val_step, writer)
+          logging.info(
+                      "##### %s step: [%03d/%03d] | %s #####",
+                      dataset,
+                      len(loader),
+                      step,
+                      self.valid_metrics.get_str(),
+                  )
           self.val_step += 1
 
         if self.args.debug:
           break
-          
-
-      return obj.avg, main_obj.avg, nll.avg, kl.avg, error_metric.avg, ece.avg, entropy.avg

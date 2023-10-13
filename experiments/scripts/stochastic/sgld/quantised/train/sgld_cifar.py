@@ -131,12 +131,12 @@ def main():
 
       logging.info('## Beginning Training ##')
 
-      train = Trainer(model, criterion, optimizer, scheduler, args)
+      train = Trainer(model, criterion, optimizer, scheduler, args, writer=writer)
 
       sample_name = re.findall('[0-9]+', sample_names[i])
       sample_name = "_"+sample_name[0]
       best_error, train_time, val_time = train.train_loop(
-          train_loader, valid_loader, writer, special_info=sample_name)
+          train_loader, valid_loader, special_info=sample_name)
 
       logging.info('## Finished training, the best observed validation error: {}, total training time: {}, total validation time: {} ##'.format(
           best_error, timedelta(seconds=train_time), timedelta(seconds=val_time)))

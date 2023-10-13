@@ -110,10 +110,10 @@ def main():
 
     logging.info('## Beginning Training ##')
 
-    train = Trainer(model, criterion, optimizer, scheduler,  args)
+    train = Trainer(model, criterion, optimizer, scheduler,  args, writer=writer)
 
     best_error, train_time, val_time = train.train_loop(
-        train_loader, valid_loader, writer)
+        train_loader, valid_loader)
 
     logging.info('## Finished training, the best observed validation error: {}, total training time: {}, total validation time: {} ##'.format(
         best_error, timedelta(seconds=train_time), timedelta(seconds=val_time)))

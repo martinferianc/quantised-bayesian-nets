@@ -10,6 +10,7 @@ from src.data import *
 import src.utils as utils
 from experiments.presentation.plot_settings import PLT as plt
 import src.quant_utils as quant_utils
+from src.metrics import ClassificationMetric, RegressionMetric
 
 DISTORTIONS = ['rotation', 'shift', 'brightness']
 METRICS = ['entropy','ece','error','nll']
@@ -329,26 +330,31 @@ def _plot_model_certainty(output, plt, n_bins=10):
 def _evaluate_with_loader(loader, model, args):
     target = []
     output = []
-    error = utils.AverageMeter()
-    nll = utils.AverageMeter()
-    ece = utils.AverageMeter()
-    entropy = utils.AverageMeter()
+    metric = ClassificationMetric(output_size=args.output_size) if args.task == 'classification' else RegressionMetric(output_size=args.output_size)
     
     for i, (input, _target) in enumerate(loader):
-      n = _target.shape[0]
       input = torch.autograd.Variable(input, requires_grad=False)
       _target = torch.autograd.Variable(_target, requires_grad=False)
       if not args.q and next(model.parameters()).is_cuda:
         input = input.cuda()
         _target = _target.cuda()
-      out = model(input)
-      _error, _ece, _entropy, _nll, _output = utils.evaluate(
-          out, input, _target, model, args)
-
-      nll.update(_nll, n)
-      ece.update(_ece, n)
-      error.update(_error, n)
-      entropy.update(_entropy, n)
+        
+      _output = model(input)
+      
+      if args.samples>1 and model is not None and model.training is False:
+        y = [_output]
+        for _ in range(1, args.samples):
+          y.append(model(input))
+        if "regression" in args.task:
+          mu = [_y[0] for _y in y]
+          var = [_y[1] for _y in y]
+          mean = torch.stack(mu, dim=1).mean(dim=1)
+          var = torch.stack(mu, dim=1).var(dim=1) + torch.stack(var, dim=1).mean(dim=1)
+          _output = (mean, var)
+        else:
+          _output = torch.stack(y, dim=1).mean(dim=1)
+          
+      metric.update(_output, _target)
 
       target.append(_target)
       output.append(_output)
@@ -362,7 +368,13 @@ def _evaluate_with_loader(loader, model, args):
       output = [torch.cat(mu, dim=0).cpu(), torch.cat(var, dim=0).cpu()]
     else:
       output = torch.cat(output, dim=0).cpu()
-    return error.avg, ece.avg, entropy.avg, nll.avg, output, target
+      
+    error = metric.error.compute().item() if args.task == 'classification' else metric.rmse.compute().item()
+    ece = metric.ece.compute().item() if args.task == 'classification' else 0.0
+    entropy = metric.entropy.compute().item() if args.task == 'classification' else 0.0
+    nll = metric.nll.compute().item()
+      
+    return error, ece, entropy, nll, output, target
 
 def _evaluate_and_record(model, results, args, train=True, valid=True, test=True):
     train_loader, val_loader = get_train_loaders(args)
